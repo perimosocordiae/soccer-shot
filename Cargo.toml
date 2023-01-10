@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 mouse-rs = "0.4"
 screenshots = "0.4"
+xcb = "1.1.1"
