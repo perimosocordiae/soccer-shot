@@ -22,7 +22,7 @@ struct Args {
     shot_type: ShotType,
 }
 
-#[derive(clap::ValueEnum, Debug, Clone)]
+#[derive(clap::ValueEnum, Debug, Clone, PartialEq)]
 enum ShotType {
     None,
     Center,
@@ -34,31 +34,32 @@ fn main() {
     let args = Args::parse();
 
     let screen = Screen::from_point(args.game_x, args.game_y).unwrap();
-    println!("{:?}", screen);
+    println!("{:?}", screen.display_info);
     if screen.display_info.scale_factor != 1.0 {
         panic!("Pixel scaling not yet supported.");
     }
     if screen.display_info.x != 0 || screen.display_info.y != 0 {
         panic!("Multi-monitor not yet supported.");
     }
-
-    let image = screen
-        .capture_area(args.game_x, args.game_y, GAME_WIDTH, GAME_HEIGHT)
-        .unwrap();
-    fs::write("target/game.png", image.buffer()).unwrap();
-
     let mouse = Mouse::new();
     let orig_pos = mouse.get_position().unwrap();
     println!("mouse pos = {:?}", orig_pos);
+
+    if args.shot_type == ShotType::None {
+        let image = screen
+            .capture_area(args.game_x, args.game_y, GAME_WIDTH, GAME_HEIGHT)
+            .unwrap();
+        fs::write("target/game.png", image.buffer()).unwrap();
+        return;
+    }
+
     // Restore window focus.
     mouse.move_to(orig_pos.x, args.game_y - 5).unwrap();
     mouse.click(&Keys::LEFT).expect("Unable to click LMB");
     thread::sleep(Duration::from_millis(100));
 
     match args.shot_type {
-        ShotType::None => {
-            return;
-        }
+        ShotType::None => unreachable!(),
         ShotType::Manual => {
             // Return to original position.
             mouse.move_to(orig_pos.x, orig_pos.y).unwrap();
@@ -86,7 +87,7 @@ fn main() {
 
 fn track_target(pos: Point) {
     let mut prev_red = 0;
-    for i in 0..5000 {
+    for i in 0..4000 {
         let bgra_pixels = capture(
             pos.x - TARGET_RADIUS,
             pos.y - TARGET_RADIUS,
