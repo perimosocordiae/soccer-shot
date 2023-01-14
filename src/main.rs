@@ -5,7 +5,9 @@ use mouse_rs::{
 };
 use screenshots::Screen;
 use std::{
-    fs, thread,
+    fs,
+    io::{stdin, stdout, Write},
+    thread,
     time::{Duration, Instant},
 };
 use xcb::x::{Drawable, GetImage, ImageFormat};
@@ -22,13 +24,11 @@ struct Args {
     game_x: i32,
     #[clap(long, default_value_t = 609)]
     game_y: i32,
-    #[arg(value_enum, default_value = "none")]
-    shot_type: ShotType,
+    #[clap(long, default_value_t = false)]
+    ready: bool,
 }
 
-#[derive(clap::ValueEnum, Debug, Clone, PartialEq)]
 enum ShotType {
-    None,
     Center,
     Lob,
     Manual,
@@ -46,10 +46,9 @@ fn main() {
     }
 
     let mouse = Mouse::new();
-    let orig_pos = mouse.get_position().unwrap();
-    if args.shot_type == ShotType::None {
+    if !args.ready {
         println!("{:?}", screen.display_info);
-        println!("mouse pos = {:?}", orig_pos);
+        println!("mouse pos = {:?}", mouse.get_position().unwrap());
         let image = screen
             .capture_area(args.game_x, args.game_y, GAME_WIDTH, GAME_HEIGHT)
             .unwrap();
@@ -57,24 +56,47 @@ fn main() {
         return;
     }
 
-    // Restore game window focus.
     let center_x = args.game_x + (GAME_WIDTH / 2) as i32;
-    mouse.move_to(center_x, args.game_y - 5).unwrap();
-    mouse.click(&Keys::LEFT).expect("Unable to click LMB");
-    thread::sleep(Duration::from_millis(100));
+    let game_y = args.game_y;
+    let mut input_buffer = String::new();
+    println!("Shot types: [c]enter, [l]ob, [m]anual, [q]uit");
+    loop {
+        print!("> ");
+        stdout().flush().unwrap();
+        stdin().read_line(&mut input_buffer).unwrap();
+        match input_buffer.trim() {
+            "c" => take_shot(&mouse, center_x, game_y, ShotType::Center),
+            "l" => take_shot(&mouse, center_x, game_y, ShotType::Lob),
+            "m" => take_shot(&mouse, center_x, game_y, ShotType::Manual),
+            "q" => break,
+            _ => println!(
+                "Invalid input: '{:?}'. Shot types: [c]enter, [l]ob, [m]anual, [q]uit",
+                &input_buffer
+            ),
+        }
+        input_buffer.clear();
+    }
+}
 
-    match args.shot_type {
-        ShotType::None => unreachable!(),
+fn take_shot(mouse: &Mouse, center_x: i32, game_y: i32, shot_type: ShotType) {
+    let orig_pos = mouse.get_position().unwrap();
+
+    // Restore game window focus.
+    mouse.move_to(center_x, game_y - 5).unwrap();
+    mouse.click(&Keys::LEFT).expect("Unable to click LMB");
+    thread::sleep(Duration::from_millis(50));
+
+    match shot_type {
         ShotType::Manual => {
             // Return to original position.
             mouse.move_to(orig_pos.x, orig_pos.y).unwrap();
         }
         ShotType::Center => {
-            let y = args.game_y + (11 * GAME_HEIGHT / 16) as i32;
+            let y = game_y + (11 * GAME_HEIGHT / 16) as i32;
             mouse.move_to(center_x, y).unwrap();
         }
         ShotType::Lob => {
-            let y = args.game_y + GAME_HEIGHT as i32 - TARGET_RADIUS - 1;
+            let y = game_y + GAME_HEIGHT as i32 - TARGET_RADIUS - 1;
             mouse.move_to(center_x, y).unwrap();
         }
     }
