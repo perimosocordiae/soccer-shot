@@ -4,13 +4,17 @@ use mouse_rs::{
     Mouse,
 };
 use screenshots::Screen;
-use std::{fs, thread, time::Duration};
+use std::{
+    fs, thread,
+    time::{Duration, Instant},
+};
 use xcb::x::{Drawable, GetImage, ImageFormat};
 
 const GAME_WIDTH: u32 = 400;
 const GAME_HEIGHT: u32 = 720;
 const TARGET_RADIUS: i32 = 80;
 const TARGET_DIAMETER: u32 = (TARGET_RADIUS * 2) as u32;
+const TIME_PER_FRAME: Duration = Duration::from_millis(16); // 60 FPS
 
 #[derive(Parser)]
 struct Args {
@@ -34,18 +38,18 @@ fn main() {
     let args = Args::parse();
 
     let screen = Screen::from_point(args.game_x, args.game_y).unwrap();
-    println!("{:?}", screen.display_info);
     if screen.display_info.scale_factor != 1.0 {
-        panic!("Pixel scaling not yet supported.");
+        panic!("Pixel scaling not yet supported: {:?}", screen.display_info);
     }
     if screen.display_info.x != 0 || screen.display_info.y != 0 {
-        panic!("Multi-monitor not yet supported.");
+        panic!("Multi-monitor not yet supported: {:?}", screen.display_info);
     }
+
     let mouse = Mouse::new();
     let orig_pos = mouse.get_position().unwrap();
-    println!("mouse pos = {:?}", orig_pos);
-
     if args.shot_type == ShotType::None {
+        println!("{:?}", screen.display_info);
+        println!("mouse pos = {:?}", orig_pos);
         let image = screen
             .capture_area(args.game_x, args.game_y, GAME_WIDTH, GAME_HEIGHT)
             .unwrap();
@@ -53,8 +57,9 @@ fn main() {
         return;
     }
 
-    // Restore window focus.
-    mouse.move_to(orig_pos.x, args.game_y - 5).unwrap();
+    // Restore game window focus.
+    let center_x = args.game_x + (GAME_WIDTH / 2) as i32;
+    mouse.move_to(center_x, args.game_y - 5).unwrap();
     mouse.click(&Keys::LEFT).expect("Unable to click LMB");
     thread::sleep(Duration::from_millis(100));
 
@@ -65,14 +70,12 @@ fn main() {
             mouse.move_to(orig_pos.x, orig_pos.y).unwrap();
         }
         ShotType::Center => {
-            let x = args.game_x + (GAME_WIDTH / 2) as i32;
             let y = args.game_y + (11 * GAME_HEIGHT / 16) as i32;
-            mouse.move_to(x, y).unwrap();
+            mouse.move_to(center_x, y).unwrap();
         }
         ShotType::Lob => {
-            let x = args.game_x + (GAME_WIDTH / 2) as i32;
             let y = args.game_y + GAME_HEIGHT as i32 - TARGET_RADIUS - 1;
-            mouse.move_to(x, y).unwrap();
+            mouse.move_to(center_x, y).unwrap();
         }
     }
 
@@ -86,8 +89,10 @@ fn main() {
 }
 
 fn track_target(pos: Point) {
-    let mut prev_red = 0;
-    for i in 0..4000 {
+    std::thread::sleep(TIME_PER_FRAME * 10);
+    let mut frame_time = Instant::now() + TIME_PER_FRAME;
+    let mut baseline = 0;
+    for i in 0..60 {
         let bgra_pixels = capture(
             pos.x - TARGET_RADIUS,
             pos.y - TARGET_RADIUS,
@@ -100,14 +105,15 @@ fn track_target(pos: Point) {
             .chunks_exact(4)
             .filter(|bgra| bgra[2].saturating_sub(bgra[1]).saturating_sub(bgra[0]) > 0)
             .count();
-        if num_red == 0 {
-            continue;
-        } else if num_red != prev_red {
+        if baseline == 0 {
+            baseline = num_red;
+            println!("baseline = {}", baseline);
+        } else if num_red > baseline + 300 {
             println!("target {}: num red = {}", i, num_red);
-            prev_red = num_red;
-        } else if num_red >= 6200 {
             break;
         }
+        std::thread::sleep(frame_time.saturating_duration_since(Instant::now()));
+        frame_time += TIME_PER_FRAME;
     }
 }
 
