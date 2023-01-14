@@ -17,6 +17,15 @@ const GAME_HEIGHT: u32 = 720;
 const TARGET_RADIUS: i32 = 80;
 const TARGET_DIAMETER: u32 = (TARGET_RADIUS * 2) as u32;
 const TIME_PER_FRAME: Duration = Duration::from_millis(16); // 60 FPS
+const BALL_PATTERN: [u8; 48] = [
+    31, 11, 17, 0, // black
+    102, 66, 55, 0, // gray
+    255, 255, 255, 0, 255, 255, 255, 0, // white (x2)
+    102, 66, 55, 0, 102, 66, 55, 0, 102, 66, 55, 0, 102, 66, 55, 0, // gray (x4)
+    255, 255, 255, 0, 255, 255, 255, 0, // white (x2)
+    102, 66, 55, 0, // gray
+    31, 11, 17, 0, // black
+];
 
 #[derive(Parser)]
 struct Args {
@@ -57,35 +66,68 @@ fn main() {
     }
 
     let center_x = args.game_x + (GAME_WIDTH / 2) as i32;
-    let game_y = args.game_y;
+    let help_text = "Shot types: [a]uto, [c]enter, [l]ob, [m]anual, [q]uit";
+    println!("{}", help_text);
     let mut input_buffer = String::new();
-    println!("Shot types: [c]enter, [l]ob, [m]anual, [q]uit");
     loop {
         print!("> ");
         stdout().flush().unwrap();
         stdin().read_line(&mut input_buffer).unwrap();
         match input_buffer.trim() {
-            "c" => take_shot(&mouse, center_x, game_y, ShotType::Center),
-            "l" => take_shot(&mouse, center_x, game_y, ShotType::Lob),
-            "m" => take_shot(&mouse, center_x, game_y, ShotType::Manual),
+            "a" => {
+                aim_shot(&mouse, center_x, args.game_x, args.game_y);
+                thread::sleep(Duration::from_millis(500));
+                take_shot(&mouse, center_x, args.game_y, ShotType::Center);
+            }
+            "c" => take_shot(&mouse, center_x, args.game_y, ShotType::Center),
+            "l" => take_shot(&mouse, center_x, args.game_y, ShotType::Lob),
+            "m" => take_shot(&mouse, center_x, args.game_y, ShotType::Manual),
             "q" => break,
-            _ => println!(
-                "Invalid input: '{:?}'. Shot types: [c]enter, [l]ob, [m]anual, [q]uit",
-                &input_buffer
-            ),
+            _ => println!("Invalid input: '{:?}'. {}", &input_buffer, help_text),
         }
         input_buffer.clear();
     }
 }
 
+fn aim_shot(mouse: &Mouse, center_x: i32, game_x: i32, game_y: i32) {
+    let orig_pos = restore_focus(mouse, center_x, game_y);
+
+    // Locate the soccer ball by sliding the BALL_PATTERN across the screen.
+    let bgra_pixels = capture(game_x, game_y, GAME_WIDTH, GAME_HEIGHT).unwrap();
+    let (raw_idx, _) = bgra_pixels
+        .windows(BALL_PATTERN.len())
+        .enumerate()
+        .min_by_key(|&(_, window)| {
+            let mut diff = 0;
+            for (j, pixel) in window.iter().enumerate() {
+                diff += pixel.abs_diff(BALL_PATTERN[j]) as u32;
+            }
+            diff
+        })
+        .unwrap();
+    let idx = (raw_idx + BALL_PATTERN.len() / 2) / 4;
+    let ball_x = game_x + (idx % GAME_WIDTH as usize) as i32;
+    let ball_y = game_y + (idx / GAME_WIDTH as usize) as i32;
+    println!("ball = ({}, {})", ball_x, ball_y);
+
+    // Compute the vector from orig_pos to the ball.
+    let dx = ball_x - orig_pos.x;
+    let dy = ball_y - orig_pos.y;
+    // Scale to length 125.
+    let scale = 125.0 / ((dx * dx + dy * dy) as f32).sqrt();
+    let dx = (dx as f32 * scale) as i32;
+    let dy = (dy as f32 * scale) as i32;
+
+    // Aim the shot.
+    mouse.press(&Keys::LEFT).unwrap();
+    thread::sleep(Duration::from_millis(100));
+    mouse.move_to(orig_pos.x + dx, orig_pos.y + dy).unwrap();
+    thread::sleep(Duration::from_millis(100));
+    mouse.release(&Keys::LEFT).unwrap();
+}
+
 fn take_shot(mouse: &Mouse, center_x: i32, game_y: i32, shot_type: ShotType) {
-    let orig_pos = mouse.get_position().unwrap();
-
-    // Restore game window focus.
-    mouse.move_to(center_x, game_y - 5).unwrap();
-    mouse.click(&Keys::LEFT).expect("Unable to click LMB");
-    thread::sleep(Duration::from_millis(50));
-
+    let orig_pos = restore_focus(mouse, center_x, game_y);
     match shot_type {
         ShotType::Manual => {
             // Return to original position.
@@ -108,6 +150,15 @@ fn take_shot(mouse: &Mouse, center_x: i32, game_y: i32, shot_type: ShotType) {
 
     // Restore the original mouse position.
     mouse.move_to(orig_pos.x, orig_pos.y).unwrap();
+}
+
+fn restore_focus(mouse: &Mouse, center_x: i32, game_y: i32) -> Point {
+    let orig_pos = mouse.get_position().unwrap();
+    mouse.move_to(center_x, game_y - 5).unwrap();
+    mouse.click(&Keys::LEFT).expect("Unable to click LMB");
+    thread::sleep(Duration::from_millis(50));
+    mouse.move_to(orig_pos.x, orig_pos.y).unwrap();
+    orig_pos
 }
 
 fn track_target(pos: Point) {
