@@ -61,7 +61,7 @@ fn main() {
         let image = screen
             .capture_area(args.game_x, args.game_y, GAME_WIDTH, GAME_HEIGHT)
             .unwrap();
-        fs::write("target/game.png", image.buffer()).unwrap();
+        fs::write("target/game.png", image.to_png().unwrap()).unwrap();
         return;
     }
 
